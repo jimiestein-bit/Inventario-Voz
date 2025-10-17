@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inventario por Voz</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; background: #fafafa; color: #222; }
+  h1 { font-size: 1.4em; }
+  button { padding: 10px 20px; margin: 10px 5px; font-size: 1em; }
+  table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+  th { background: #eee; }
+  #status { margin-top: 10px; color: #007b00; font-weight: bold; }
+  .btn-eliminar { background: #e74c3c; color: white; border: none; padding: 5px 10px; cursor: pointer; }
+  .btn-eliminar:hover { background: #c0392b; }
+</style>
+</head>
+<body>
+
+<h1>📦 Inventario por Voz</h1>
+
+<button id="startBtn">🎙 Hablar</button>
+<button id="exportBtn">⬇ Exportar a Excel</button>
+<button id="resetBtn">🔄 Resetear Inventario</button>
+<div id="status"></div>
+
+<table id="tabla">
+  <thead>
+    <tr><th>Ítem</th><th>Cantidad</th><th>Eliminar</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+let items = JSON.parse(localStorage.getItem("items_voz")) || ["Shaman ipa", "Pachacutec", "Troglo red", "Troglo ipa", "Chimay"];
+let inventario = JSON.parse(localStorage.getItem("inventario_voz")) || {};
+items.forEach(i => { if (!(i in inventario)) inventario[i] = 0; });
+
+const tabla = document.querySelector("#tabla tbody");
+const status = document.getElementById("status");
+
+function actualizarTabla() {
+  tabla.innerHTML = "";
+  for (let item of items) {
+    let row = `<tr>
+      <td>${item}</td>
+      <td>${inventario[item]}</td>
+      <td><button class="btn-eliminar" onclick="eliminarItem('${item}')">Eliminar</button></td>
+    </tr>`;
+    tabla.innerHTML += row;
+  }
+  localStorage.setItem("inventario_voz", JSON.stringify(inventario));
+  localStorage.setItem("items_voz", JSON.stringify(items));
+}
+
+actualizarTabla();
+
+function agregarItem(nuevo) {
+  if (!nuevo) return;
+  nuevo = nuevo.trim();
+  if (items.find(i => i.toLowerCase() === nuevo.toLowerCase())) {
+    status.textContent = `⚠ ${nuevo} ya existe`;
+    return;
+  }
+  items.push(nuevo);
+  inventario[nuevo] = 0;
+  localStorage.setItem("items_voz", JSON.stringify(items));
+  localStorage.setItem("inventario_voz", JSON.stringify(inventario));
+  status.textContent = `🆕 Agregado producto: ${nuevo}`;
+  actualizarTabla();
+}
+
+function eliminarItem(nombre) {
+  nombre = nombre.trim();
+  const index = items.findIndex(i => i.toLowerCase() === nombre.toLowerCase());
+  if (index === -1) {
+    status.textContent = `❌ No se encontró ${nombre}`;
+    return;
+  }
+  const eliminado = items.splice(index, 1)[0];
+  delete inventario[eliminado];
+  localStorage.setItem("items_voz", JSON.stringify(items));
+  localStorage.setItem("inventario_voz", JSON.stringify(inventario));
+  status.textContent = `🗑 Producto eliminado: ${eliminado}`;
+  actualizarTabla();
+}
+
+function procesarTexto(texto) {
+  texto = texto.toLowerCase().trim();
+
+  // Comando para agregar producto
+  if (texto.startsWith("agregar producto")) {
+    let nuevo = texto.replace("agregar producto", "").trim();
+    if (nuevo.length > 0) agregarItem(nuevo);
+    else status.textContent = "❌ No se entendió el nombre del nuevo producto";
+    return;
+  }
+
+  // Comando para eliminar producto
+  if (texto.startsWith("eliminar producto")) {
+    let nombre = texto.replace("eliminar producto", "").trim();
+    if (nombre.length > 0) eliminarItem(nombre);
+    else status.textContent = "❌ No se entendió qué producto eliminar";
+    return;
+  }
+
+  // Buscar ítem existente
+  let encontrado = items.find(i => texto.includes(i.toLowerCase()));
+  if (!encontrado) {
+    status.textContent = "❌ Ítem no reconocido";
+    return;
+  }
+
+  let numeroMatch = texto.match(/\d+/);
+  let numero = numeroMatch ? parseInt(numeroMatch[0]) : NaN;
+
+  if (isNaN(numero)) {
+    status.textContent = "❌ No se detectó cantidad";
+    return;
+  }
+
+  // Operaciones
+  if (texto.includes("más")) {
+    inventario[encontrado] += numero;
+    status.textContent = `➕ Sumado ${numero} a ${encontrado}`;
+  } else if (texto.includes("menos")) {
+    inventario[encontrado] -= numero;
+    if (inventario[encontrado] < 0) inventario[encontrado] = 0;
+    status.textContent = `➖ Restado ${numero} de ${encontrado}`;
+  } else {
+    inventario[encontrado] = numero;
+    status.textContent = `✅ ${encontrado}: ${numero}`;
+  }
+
+  localStorage.setItem("inventario_voz", JSON.stringify(inventario));
+  actualizarTabla();
+}
+
+document.getElementById("startBtn").onclick = () => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    status.textContent = "⚠ Tu navegador no soporta reconocimiento de voz";
+    return;
+  }
+  const recog = new SpeechRecognition();
+  recog.lang = "es-ES";
+  recog.start();
+  status.textContent = "🎤 Escuchando...";
+  recog.onresult = (event) => {
+    const texto = event.results[0][0].transcript;
+    procesarTexto(texto);
+  };
+  recog.onerror = () => { status.textContent = "⚠ Error al escuchar"; };
+};
+
+document.getElementById("exportBtn").onclick = () => {
+  let fecha = new Date().toISOString().slice(0,10);
+  let ws_data = [["Ítem", "Cantidad"]];
+  for (let item of items) ws_data.push([item, inventario[item]]);
+  let wb = XLSX.utils.book_new();
+  let ws = XLSX.utils.aoa_to_sheet(ws_data);
+  XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+  XLSX.writeFile(wb, `inventario_${fecha}.xlsx`);
+};
+
+document.getElementById("resetBtn").onclick = () => {
+  for (let item of items) {
+    inventario[item] = 0;
+  }
+  localStorage.setItem("inventario_voz", JSON.stringify(inventario));
+  status.textContent = "🔄 Inventario reseteado a cero";
+  actualizarTabla();
+};
+</script>
+
+</body>
+</html>
